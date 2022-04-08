@@ -1,0 +1,225 @@
+#!/bin/sh
+set -e
+
+usage() {
+  echo >&2 "
+Usage: $(basename "$0") [OPTIONS] [FILES]
+
+Options:
+    -h|--help   Print this message
+    -v          Verbose
+    -f          Force
+    -F          More force
+    -n          Dry run
+
+Environment Variables:
+    LN_CONF_PATH        Path or paths to manifest files delimited by \":\"
+                        Default: $HOME/.ln-conf:$HOME/.ln-conf.d/*
+    LN_CONF_LOG_PATH    Path to log file which keeps track of symlinks
+                        Default: $HOME/.ln-conf.log
+    LN_CONF_LOG_BACKUP  If set, create backup of log file
+                        Default: <unset>
+"
+  exit 6
+}
+
+_time=$(date +%s)
+
+while [ -n "$1" ]; do
+  case $1 in
+    -h|--help) usage;;
+    -v) _verbose=1;;
+    -f) _force=1;;
+    -F) _force=1; _move_files=1;;
+    -n) _dry=1;;
+    *) _target_path="${_target_path:+$_target_path:}$1";;
+  esac
+  shift
+done
+
+_target_path=${_target_path:-${LN_CONF_PATH:-"$HOME/.ln-conf:$HOME/.ln-conf.d/*"}}
+
+_log_path="${LN_CONF_LOG_PATH:-$HOME/.ln-conf.log}"
+_log=$(cat "$_log_path" 2>/dev/null)
+
+cc_manifest() { _manifest=$(printf "%s${_manifest:+\n}%s" "$_manifest" "$1"); }
+cc_warn() { _warn=$(printf "%s${_warn:+\n}%s" "$_warn" "$1"); }
+cc_errs() { _errs=$(printf "%s${_errs:+\n}%s" "$_errs" "$1"); }
+cc_torm() { _torm=$(printf "%s${_torm:+\n}%s" "$_torm" "$1"); }
+cc_toln() { _toln=$(printf "%s${_toln:+\n}%s" "$_toln" "$1"); }
+cc_tomv() { _tomv=$(printf "%s${_tomv:+\n}%s" "$_tomv" "$1"); }
+
+_add_line() {
+  _path_dir=$(dirname "$1")
+  if echo "$2" | grep -q "/$"; then
+    _name="$(cd "$_path_dir"; realpath "$2")"
+    _ts="$(cd "$_path_dir"; echo $3)"
+    _IFS=IFS; IFS=" "
+    for _t in $_ts; do
+      cc_manifest "$_name/$(basename "$_t"):$(cd "$_path_dir"; realpath "$_t")"
+    done; IFS=_IFS
+  else
+    _name="$(cd "$_path_dir"; realpath "$(dirname "$2")")/$(basename "$2")"
+    _target=$(cd "$_path_dir"; realpath "$3")
+    cc_manifest "$_name:$_target"
+  fi
+}
+
+_add_manifest() {
+  _path=$(realpath "$1" 2>/dev/null || true)
+  if [ ! -f "$_path" ]; then
+    if [ -n "$_verbose" ]; then cc_warn "manifest path $1 isn't a file"; fi
+    return
+  fi
+
+  if [ -n "$_verbose" ]; then echo >&2 "INFO: reading manifest file $_path"; fi
+  _file=$(cat "$_path" 2>/dev/null | envsubst)
+
+  _lnum=0
+  while IFS=: read -r name target; do
+    _lnum=$((_lnum+=1))
+    if [ -n "$name" ] && [ -n "$target" ]; then
+      _add_line "$_path" "$name" "$target"
+    else
+      cc_warn "malformated line in $_path:$_lnum"
+    fi
+  done <<EOF
+$_file
+EOF
+}
+
+IFS=:
+for path in $_target_path; do
+  if [ -n "$path" ]; then
+    _IFS=IFS; IFS=" "
+    for _p in $path; do
+      _add_manifest "$_p"
+    done; IFS=_IFS
+  fi
+done
+unset IFS
+
+if [ -z "$_force" ] && [ -z "$_manifest" ]; then
+  cc_errs "empty target manifest (use -f to ignore)"
+fi
+
+_manifest=$(echo "$_manifest" | sort -u)
+__manifest=$_manifest
+
+_manifest_paths=$(echo "$_manifest" | cut -d: -f1)
+
+if [ -z "$_force" ] && [ "$_manifest_paths" != "$(echo "$_manifest_paths" | uniq)" ]; then
+  cc_errs "conflicting paths in manifest (use -f to ignore)"
+fi
+
+_link() {
+  if [ -e "$1" ] || [ -L "$1" ]; then
+    if [ -L "$1" ] && [ "$(readlink -f "$1")" = "$2" ]; then
+      if [ -n "$_verbose" ]; then echo "  $1 -> $2"; fi
+      cc_warn "file $1 already exists but shouldn't"
+    else
+      if echo "$_torm" | grep -q "^$1$"; then
+        echo "+ $1 -> $2"
+        cc_toln "$1:$2"
+      else
+        echo "~ $1 -> $2"
+        if [ -n "$_move_files" ]; then
+          cc_warn "file $1 already exists, moving it to $1-$_time"
+          cc_tomv "$1"
+          cc_toln "$1:$2"
+        else
+          cc_errs "can't link $1, a file already exists (use -F to move existing files)"
+        fi
+      fi
+    fi
+  else
+    echo "+ $1 -> $2"
+    cc_toln "$1:$2"
+  fi
+}
+
+_unlink() {
+  if [ -e "$1" ] || [ -L "$1" ]; then
+    if [ -L "$1" ] && [ "$(readlink -f "$1")" = "$2" ]; then
+      if echo "$__manifest" | grep -q "^$1:$2$"; then
+        if [ -n "$_verbose" ]; then echo "  $1 -> $2"; fi
+        __manifest=$(echo "$__manifest" | grep -v "^$1:$2$") || true
+      else
+        echo "- $1 -> $2"
+        cc_torm "$1"
+      fi
+    else
+      cc_warn "file $1 exists but doesn't match old manifest"
+    fi
+  else
+    cc_warn "file $1 doesn't exist, but should"
+  fi
+}
+
+while IFS=: read -r name target; do
+  if [ -n "$name" ] && [ -n "$target" ]; then
+    _unlink "$name" "$target"
+  fi
+done <<EOF
+$_log
+EOF
+
+while IFS=: read -r name target; do
+  if [ -n "$name" ] && [ -n "$target" ]; then
+    _link "$name" "$target"
+  fi
+done <<EOF
+$__manifest
+EOF
+
+if [ -n "$_warn" ]; then
+  while read -r msg; do
+    echo >&2 "WARN: $msg"
+  done <<EOF
+$_warn
+EOF
+fi
+
+if [ -n "$_errs" ]; then
+  while read -r err; do
+    echo >&2 "ERROR: $err"
+  done <<EOF
+$_errs
+EOF
+  echo >&2 "Aborting, nothing will be applied!"
+  exit 1
+fi
+
+if [ -n "$_dry" ]; then
+  echo >&2 "Dry run, nothing will be applied!"
+  exit 1
+fi
+
+while read -r target; do
+  if [ -n "$target" ]; then rm "$target"; fi
+done <<EOF
+$_torm
+EOF
+
+while read -r target; do
+  if [ -n "$target" ]; then mv "$target" "$target-$_time"; fi
+done <<EOF
+$_tomv
+EOF
+
+while IFS=: read -r name target; do
+  if [ -n "$name" ] && [ -n "$target" ]; then
+    mkdir -p "$(dirname "$name")"
+    ln -sT "$target" "$name"
+  fi
+done <<EOF
+$_toln
+EOF
+
+if [ "$_log" != "$_manifest" ]; then
+  if [ -n "$LN_CONF_LOG_BACKUP" ] && [ -n "$_log" ]; then
+    mkdir -p "$(dirname "$_log_path")"
+    echo "$_log" > "$_log_path-$_time"
+  fi
+  echo "$_manifest" > "$_log_path"
+fi

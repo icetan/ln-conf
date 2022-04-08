@@ -1,30 +1,45 @@
 { pkgs ? import <nixpkgs> { }
 }:
 let
-  inherit (pkgs) dash writeScriptBin writeTextDir buildEnv;
-in
+  inherit (pkgs)
+    dash gettext coreutils gnugrep
+    writeScriptBin writeTextDir;
 
-{ pkgs ? [ ], links ? { } }:
+  ln-conf = import ./. { inherit pkgs; };
 
-let
-  manifest =
-    let
-      sortedPaths = builtins.sort (a: b: a < b) (builtins.attrNames links);
-      lines = map (path: "${path} ${links.${path}}\n") sortedPaths;
-    in
-    writeTextDir "share/nix-ln-conf-manifest" (builtins.concatStringsSep "" lines);
+  concatManifest = import ./manifest.nix;
 
-  bin = writeScriptBin "nix-ln-conf" ''
+  bin = writeScriptBin "ln-conf" ''
     #!${dash}/bin/dash
-    ${builtins.readFile ./nix-ln-conf.sh}
+    PATH="${gettext}/bin:${coreutils}/bin:${gnugrep}/bin"
+    ${builtins.readFile ./ln-conf}
   '';
-  #TARGET_MANIFEST_PATH="${manifest}"
 
-  paths = pkgs ++ [ manifest bin ];
+  # str -> [{ *: str }] -> drv
+  mkManifest = name: links:
+    writeTextDir "etc/ln-conf.d/${name}" (concatManifest links);
 
-  env = buildEnv {
-    inherit paths;
-    name = "nix-ln-conf-env";
-  };
+  # str -> [{ paths: [drv], links: { *: str }, vars: { *: str } }] -> drv
+  mkEnv = name: envs:
+    let
+      envs' = builtins.concatMap (env: env.envs or [env]) (if builtins.isList envs then envs else [envs]);
+      links = builtins.foldl' (acc: env: acc // env.links or { }) { } envs';
+      varsToText = vars: map (n: n + "=" + vars.${n}) (builtins.attrNames vars);
+      vars = builtins.concatMap (env: varsToText (env.vars or { })) envs';
+      manifest = mkManifest name (links // {
+        "$HOME/.env" = pkgs.writeText "${name}-env-vars" (builtins.concatStringsSep "\n" vars);
+      });
+      paths = [ manifest ]
+        ++ builtins.concatMap (env: env.paths or [ ]) envs';
+    in
+    (pkgs.buildEnv {
+      inherit name paths;
+      ignoreCollisions = true;
+    }) // {
+      inherit manifest;
+      envs = envs';
+    };
 in
-env
+bin // {
+  inherit mkManifest mkEnv;
+}
