@@ -78,7 +78,9 @@ _add_manifest() {
   _lnum=0
   while IFS=: read -r name target; do
     _lnum=$((_lnum+=1))
-    if [ -n "$name" ] && [ -n "$target" ]; then
+    if [ "${name#\#}" != "$name" ]; then
+      continue
+    elif [ -n "$name" ] && [ -n "$target" ]; then
       _add_line "$_path" "$name" "$target"
     else
       cc_warn "malformated line in $_path:$_lnum"
