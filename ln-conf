@@ -162,6 +162,10 @@ _unlink() {
   fi
 }
 
+_sudo() {
+  "$@" 2>/dev/null || sudo "$@"
+}
+
 while IFS=: read -r name target; do
   if [ -n "$name" ] && [ -n "$target" ]; then
     _unlink "$name" "$target"
@@ -202,21 +206,21 @@ if [ -n "$_dry" ]; then
 fi
 
 while read -r target; do
-  if [ -n "$target" ]; then rm "$target"; fi
+  if [ -n "$target" ]; then _sudo rm "$target"; fi
 done <<EOF
 $_torm
 EOF
 
 while read -r target; do
-  if [ -n "$target" ]; then mv "$target" "$target-$_time"; fi
+  if [ -n "$target" ]; then _sudo mv "$target" "$target-$_time"; fi
 done <<EOF
 $_tomv
 EOF
 
 while IFS=: read -r name target; do
   if [ -n "$name" ] && [ -n "$target" ]; then
-    mkdir -p "$(dirname "$name")"
-    ln -sT "$target" "$name"
+    _sudo mkdir -p "$(dirname "$name")"
+    _sudo ln -sT "$target" "$name"
   fi
 done <<EOF
 $_toln
@@ -224,7 +228,7 @@ EOF
 
 if [ "$_log" != "$_manifest" ]; then
   if [ -n "$LN_CONF_LOG_BACKUP" ] && [ -n "$_log" ]; then
-    mkdir -p "$(dirname "$_log_path")"
+    _sudo mkdir -p "$(dirname "$_log_path")"
     echo "$_log" > "$_log_path-$_time"
   fi
   echo "$_manifest" > "$_log_path"
