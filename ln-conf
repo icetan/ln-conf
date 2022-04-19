@@ -11,6 +11,7 @@ Options:
     -f          Force
     -F          More force
     -n          Dry run
+    -a          Add only
 
 Environment Variables:
     LN_CONF_PATH        Path or paths to manifest files delimited by \":\"
@@ -32,6 +33,7 @@ while [ -n "$1" ]; do
     -f) _force=1;;
     -F) _force=1; _move_files=1;;
     -n) _dry=1;;
+    -a) _add=1;;
     *) _target_path="${_target_path:+$_target_path:}$1";;
   esac
   shift
@@ -41,6 +43,8 @@ _target_path=${_target_path:-${LN_CONF_PATH:-"$HOME/.ln-conf:$HOME/.ln-conf.d/*"
 
 _log_path="${LN_CONF_LOG_PATH:-$HOME/.ln-conf.log}"
 _log=$(cat "$_log_path" 2>/dev/null)
+
+if [ -n "$_add" ]; then _manifest="$_log"; fi
 
 cc_manifest() { _manifest=$(printf "%s${_manifest:+\n}%s" "$_manifest" "$1"); }
 cc_warn() { _warn=$(printf "%s${_warn:+\n}%s" "$_warn" "$1"); }
