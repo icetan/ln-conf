@@ -2,11 +2,11 @@
 set -e
 
 usage() {
-  echo >&2 "
+  echo >&2 "$*
 Usage: $(basename "$0") [OPTIONS] [FILES]
 
 Options:
-    -h|--help   Print this message
+    -h          Print this message
     -v          Verbose
     -f          Force
     -F          More force
@@ -26,16 +26,20 @@ Environment Variables:
 
 _time=$(date +%s)
 
-while [ -n "$1" ]; do
-  case $1 in
-    -h|--help) usage;;
-    -v) _verbose=1;;
-    -f) _force=1;;
-    -F) _force=1; _move_files=1;;
-    -n) _dry=1;;
-    -a) _add=1;;
-    *) _target_path="${_target_path:+$_target_path:}$1";;
+while getopts hvfFna opt; do
+  case $opt in
+    h|\?) usage;;
+    v) _verbose=1;;
+    f) _force=1;;
+    F) _force=1; _move_files=1;;
+    n) _dry=1;;
+    a) _add=1;;
   esac
+done
+shift $((OPTIND - 1))
+
+while [ -n "$1" ]; do
+  _target_path="${_target_path:+$_target_path:}$1"
   shift
 done
 
