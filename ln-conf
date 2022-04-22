@@ -8,35 +8,41 @@ Usage: $(basename "$0") [OPTIONS] [FILES]
 Options:
     -h          Print this message
     -v          Verbose
-    -f          Force
-    -F          More force
     -n          Dry run
+    -f          Force
+    -m          Move existing files
+    -o          Overwrite existing files
     -a          Add only
+    -d          Debug output
 
 Environment Variables:
-    LN_CONF_PATH        Path or paths to manifest files delimited by \":\"
-                        Default: $HOME/.ln-conf:$HOME/.ln-conf.d/*
-    LN_CONF_LOG_PATH    Path to log file which keeps track of symlinks
-                        Default: $HOME/.ln-conf.log
-    LN_CONF_LOG_BACKUP  If set, create backup of log file
-                        Default: <unset>
+    LN_CONF_PATH            Path or paths to manifest files delimited by \":\".
+                            Default: $HOME/.ln-conf:$HOME/.ln-conf.d/*
+    LN_CONF_LOG_PATH        Path to log file which keeps track of symlinks.
+                            Default: $HOME/.ln-conf.log
+    LN_CONF_LOG_BACKUP_DIR  If set, create backup of log files in set directory.
+                            Default: <unset>
 "
   exit 6
 }
 
 _time=$(date +%s)
 
-while getopts hvfFna opt; do
+while getopts hvnfomad opt; do
   case $opt in
     h|\?) usage;;
     v) _verbose=1;;
-    f) _force=1;;
-    F) _force=1; _move_files=1;;
     n) _dry=1;;
+    f) _force=1;;
+    o) _overwrite_files=1;;
+    m) _move_files=1;;
     a) _add=1;;
+    d) _debug=1;;
   esac
 done
 shift $((OPTIND - 1))
+
+if [ -n "$_debug" ]; then set -x; fi
 
 while [ -n "$1" ]; do
   _target_path="${_target_path:+$_target_path:}$1"
@@ -61,15 +67,18 @@ _add_line() {
   _path_dir=$(dirname "$1")
   if echo "$2" | grep -q "/$"; then
     _name="$(cd "$_path_dir"; realpath "$2")"
-    _ts="$(cd "$_path_dir"; echo $3)"
+    _ts="$(cd "$_path_dir"; echo $3)" # Don't quote, glob needs to expand
     _IFS=IFS; IFS=" "
     for _t in $_ts; do
       cc_manifest "$_name/$(basename "$_t"):$(cd "$_path_dir"; realpath "$_t")"
     done; IFS=_IFS
   else
     _name="$(cd "$_path_dir"; realpath "$(dirname "$2")")/$(basename "$2")"
-    _target=$(cd "$_path_dir"; realpath "$3")
-    cc_manifest "$_name:$_target"
+    if _target=$(cd "$_path_dir"; realpath "$3" 2>/dev/null); then
+      cc_manifest "$_name:$_target"
+    else
+      cc_errs "can't link $_name -> $3, target doesn't exist"
+    fi
   fi
 }
 
@@ -124,7 +133,7 @@ fi
 
 _link() {
   if [ -e "$1" ] || [ -L "$1" ]; then
-    if [ -L "$1" ] && [ "$(readlink -f "$1")" = "$2" ]; then
+    if [ -L "$1" ] && [ "$(readlink "$1")" = "$2" ]; then
       if [ -n "$_verbose" ]; then echo "  $1 -> $2"; fi
       cc_warn "file $1 already exists but shouldn't"
     else
@@ -137,8 +146,12 @@ _link() {
           cc_warn "file $1 already exists, moving it to $1-$_time"
           cc_tomv "$1"
           cc_toln "$1:$2"
+        elif [ -n "$_overwrite_files" ]; then
+          cc_warn "file $1 already exists, overwriting it"
+          cc_torm "$1"
+          cc_toln "$1:$2"
         else
-          cc_errs "can't link $1, a file already exists (use -F to move existing files)"
+          cc_errs "can't link $1, a file already exists (use -m to move existing files or -o to overwrite them)"
         fi
       fi
     fi
@@ -150,19 +163,29 @@ _link() {
 
 _unlink() {
   if [ -e "$1" ] || [ -L "$1" ]; then
-    if [ -L "$1" ] && [ "$(readlink -f "$1")" = "$2" ]; then
+    if [ -L "$1" ] && [ "$(readlink "$1")" = "$2" ]; then
       if echo "$__manifest" | grep -q "^$1:$2$"; then
         if [ -n "$_verbose" ]; then echo "  $1 -> $2"; fi
         __manifest=$(echo "$__manifest" | grep -v "^$1:$2$") || true
       else
-        echo "- $1 -> $2"
         cc_torm "$1"
+        echo "- $1 -> $2"
       fi
     else
-      cc_warn "file $1 exists but doesn't match old manifest"
+      if [ -n "$_move_files" ]; then
+        cc_warn "file $1 exists but doesn't match log entry, moving it to $1-$_time"
+        cc_tomv "$1"
+        echo "- $1 -> $2"
+      elif [ -n "$_overwrite_files" ]; then
+        cc_warn "file $1 exists but doesn't match log entry, removing it anyway"
+        cc_torm "$1"
+        echo "- $1 -> $2"
+      else
+        cc_errs "can't unlink $1, it doesn't match log entry (use -m to move existing files or -o to remove them)"
+      fi
     fi
   else
-    cc_warn "file $1 doesn't exist, but should"
+    cc_warn "file $1 doesn't exist, but should according to log"
   fi
 }
 
@@ -231,9 +254,9 @@ $_toln
 EOF
 
 if [ "$_log" != "$_manifest" ]; then
-  if [ -n "$LN_CONF_LOG_BACKUP" ] && [ -n "$_log" ]; then
-    _sudo mkdir -p "$(dirname "$_log_path")"
-    echo "$_log" > "$_log_path-$_time"
+  if [ -n "$LN_CONF_LOG_BACKUP_DIR" ] && [ -n "$_log" ]; then
+    _sudo mkdir -p "$LN_CONF_LOG_BACKUP_DIR"
+    echo "$_log" > "$LN_CONF_LOG_BACKUP_DIR/ln-conf-$_time.log"
   fi
   echo "$_manifest" > "$_log_path"
 fi
