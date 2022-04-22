@@ -4,14 +4,16 @@ let
   inherit (pkgs)
     dash gettext coreutils gnugrep
     writeScriptBin writeTextDir;
+  inherit (pkgs.lib) makeBinPath;
 
   ln-conf = import ./. { inherit pkgs; };
 
   concatManifest = import ./manifest.nix;
+  paths = makeBinPath [ gettext coreutils gnugrep ];
 
   bin = writeScriptBin "ln-conf" ''
     #!${dash}/bin/dash
-    PATH="${gettext}/bin:${coreutils}/bin:${gnugrep}/bin"
+    PATH="${paths}:$PATH"
     ${builtins.readFile ./ln-conf}
   '';
 
