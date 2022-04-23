@@ -1,6 +1,9 @@
 #!/bin/sh
 set -e
 
+DEF_LN_CONF_PATH="$HOME/.ln-conf"
+DEF_LN_CONF_LOG_PATH="$HOME/.ln-conf.log"
+
 usage() {
   echo >&2 "$*
 Usage: $(basename "$0") [OPTIONS] [FILES]
@@ -16,12 +19,13 @@ Options:
     -d          Debug output
 
 Environment Variables:
-    LN_CONF_PATH            Path or paths to manifest files delimited by \":\".
-                            Default: $HOME/.ln-conf:$HOME/.ln-conf.d/*
+    LN_CONF_PATH            Path or paths to manifest files delimited by \":\",
+                            globs are allowed.
+                            Default: $DEF_LN_CONF_PATH
     LN_CONF_LOG_PATH        Path to log file which keeps track of symlinks.
-                            Default: $HOME/.ln-conf.log
+                            Default: $DEF_LN_CONF_LOG_PATH
     LN_CONF_LOG_BACKUP_DIR  If set, create backup of log files in set directory.
-                            Default: <unset>
+                            Default: <empty>
 "
   exit 6
 }
@@ -49,9 +53,9 @@ while [ -n "$1" ]; do
   shift
 done
 
-_target_path=${_target_path:-${LN_CONF_PATH:-"$HOME/.ln-conf:$HOME/.ln-conf.d/*"}}
+_target_path=${_target_path:-${LN_CONF_PATH:-$DEF_LN_CONF_PATH}}
 
-_log_path="${LN_CONF_LOG_PATH:-$HOME/.ln-conf.log}"
+_log_path="${LN_CONF_LOG_PATH:-$DEF_LN_CONF_LOG_PATH}"
 _log=$(cat "$_log_path" 2>/dev/null)
 
 if [ -n "$_add" ]; then _manifest="$_log"; fi
@@ -62,6 +66,12 @@ cc_errs() { _errs=$(printf "%s${_errs:+\n}%s" "$_errs" "$1"); }
 cc_torm() { _torm=$(printf "%s${_torm:+\n}%s" "$_torm" "$1"); }
 cc_toln() { _toln=$(printf "%s${_toln:+\n}%s" "$_toln" "$1"); }
 cc_tomv() { _tomv=$(printf "%s${_tomv:+\n}%s" "$_tomv" "$1"); }
+
+if envsubst -V 2>&1 | grep -q gettext; then
+  _envsubst() { envsubst; }
+else
+  _envsubst() { envsubst -no-unset -no-empty 2>&1; }
+fi
 
 _add_line() {
   _path_dir=$(dirname "$1")
@@ -85,12 +95,20 @@ _add_line() {
 _add_manifest() {
   _path=$(realpath "$1" 2>/dev/null || true)
   if [ ! -f "$_path" ]; then
-    if [ -n "$_verbose" ]; then cc_warn "manifest path $1 isn't a file"; fi
+    if [ -n "$_force" ]; then
+      cc_warn "manifest path $1 isn't a file";
+    else
+      cc_errs "manifest path $1 isn't a file (use -f to ignore)";
+    fi
     return
   fi
 
   if [ -n "$_verbose" ]; then echo >&2 "INFO: reading manifest file $_path"; fi
-  _file=$(cat "$_path" 2>/dev/null | envsubst)
+  if _file=$(cat "$_path" 2>/dev/null | _envsubst); then :;
+  else
+    cc_errs "$_file"
+    return
+  fi
 
   _lnum=0
   while IFS=: read -r name target; do
