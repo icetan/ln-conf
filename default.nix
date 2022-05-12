@@ -24,12 +24,13 @@ let
   # str -> [{ paths: [drv], links: { *: str }, vars: { *: str } }] -> drv
   mkEnv = name: envs:
     let
-      envs' = builtins.concatMap (env: env.envs or [env]) (if builtins.isList envs then envs else [envs]);
+      envLink = envs.envLink or "$HOME/.env";
+      envs' = builtins.concatMap (env: env.envs or [env]) (if builtins.isList envs then envs else envs.envs or [envs]);
       links = builtins.foldl' (acc: env: acc // env.links or { }) { } envs';
       varsToText = vars: map (n: n + "=" + vars.${n}) (builtins.attrNames vars);
       vars = builtins.concatMap (env: varsToText (env.vars or { })) envs';
       manifest = mkManifest name (links // {
-        "$HOME/.env" = pkgs.writeText "${name}-env-vars" (builtins.concatStringsSep "\n" vars);
+        "${envLink}" = pkgs.writeText "${name}-env-vars" (builtins.concatStringsSep "\n" vars);
       });
       paths = [ manifest ]
         ++ builtins.concatMap (env: env.paths or [ ]) envs';
