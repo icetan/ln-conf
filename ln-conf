@@ -56,7 +56,7 @@ done
 _target_path=${_target_path:-${LN_CONF_PATH:-$DEF_LN_CONF_PATH}}
 
 _log_path="${LN_CONF_LOG_PATH:-$DEF_LN_CONF_LOG_PATH}"
-_log=$(cat "$_log_path" 2>/dev/null)
+_log=$(cat "$_log_path" 2>/dev/null || true)
 
 if [ -n "$_add" ]; then _manifest="$_log"; fi
 
