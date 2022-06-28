@@ -76,14 +76,14 @@ fi
 _add_line() {
   _path_dir=$(dirname "$1")
   if echo "$2" | grep -q "/$"; then
-    _name="$(cd "$_path_dir"; realpath "$2")"
+    _name="$(cd "$_path_dir"; realpath -s "$2")"
     _ts="$(cd "$_path_dir"; echo $3)" # Don't quote, glob needs to expand
     _IFS=IFS; IFS=" "
     for _t in $_ts; do
       cc_manifest "$_name/$(basename "$_t"):$(cd "$_path_dir"; realpath "$_t")"
     done; IFS=_IFS
   else
-    _name="$(cd "$_path_dir"; realpath "$(dirname "$2")")/$(basename "$2")"
+    _name="$(cd "$_path_dir"; realpath -s "$2")"
     if _target=$(cd "$_path_dir"; realpath "$3" 2>/dev/null); then
       cc_manifest "$_name:$_target"
     else
