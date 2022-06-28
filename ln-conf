@@ -27,7 +27,7 @@ Environment Variables:
     LN_CONF_LOG_BACKUP_DIR  If set, create backup of log files in set directory.
                             Default: <empty>
 
-Version: 0.0.0
+Version: 0.0.1
 "
   exit 6
 }
