@@ -114,6 +114,10 @@ _add_manifest() {
   while IFS=: read -r name target; do
     _lnum=$((_lnum+=1))
     if [ "${name#\#}" != "$name" ]; then
+      # Ignore lines that start with '#'
+      continue
+    elif [ -z "$name" ] && [ -z "$target" ]; then
+      # Ignore empty lines
       continue
     elif [ -n "$name" ] && [ -n "$target" ]; then
       _add_line "$_path" "$name" "$target"
