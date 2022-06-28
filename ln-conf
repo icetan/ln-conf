@@ -161,7 +161,7 @@ _link() {
       if [ -n "$_verbose" ]; then echo "  $1 -> $2"; fi
       cc_warn "file $1 already exists but shouldn't"
     else
-      if echo "$_torm" | grep -q "^$1$"; then
+      if echo "$1/" | grep -q "^\($(echo "$_torm" | sed 's|$|\\|' | tr '\n' '|')@@@cant-match-this@@@\)/.*$"; then
         echo "+ $1 -> $2"
         cc_toln "$1:$2"
       else
